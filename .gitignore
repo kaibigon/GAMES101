@@ -1,1 +1,10 @@
-**/build/
+.vs
+.vscode
+.xmake
+.cache
+
+# build
+build
+out
+compile_commands.json
+binary.ppm
