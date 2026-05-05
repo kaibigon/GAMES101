@@ -6,32 +6,36 @@
 #include <algorithm>
 #include <vector>
 #include "rasterizer.hpp"
+#include "eigen3/Eigen/src/Core/Matrix.h"
 #include <opencv2/opencv.hpp>
 #include <math.h>
 
+inline double signed_triangle_area(int ax, int ay, int bx, int by, int cx, int cy) {
+    return .5 * ((by - ay) * (bx + ax) + (cy - by) * (cx + bx) + (ay - cy) * (ax + cx));
+}
 
-rst::pos_buf_id rst::rasterizer::load_positions(const std::vector<Eigen::Vector3f> &positions)
+rst::pos_buf_id rst::rasterizer::load_positions(const std::vector<Eigen::Vector3f>& positions)
 {
     auto id = get_next_id();
     pos_buf.emplace(id, positions);
 
-    return {id};
+    return { id };
 }
 
-rst::ind_buf_id rst::rasterizer::load_indices(const std::vector<Eigen::Vector3i> &indices)
+rst::ind_buf_id rst::rasterizer::load_indices(const std::vector<Eigen::Vector3i>& indices)
 {
     auto id = get_next_id();
     ind_buf.emplace(id, indices);
 
-    return {id};
+    return { id };
 }
 
-rst::col_buf_id rst::rasterizer::load_colors(const std::vector<Eigen::Vector3f> &cols)
+rst::col_buf_id rst::rasterizer::load_colors(const std::vector<Eigen::Vector3f>& cols)
 {
     auto id = get_next_id();
     col_buf.emplace(id, cols);
 
-    return {id};
+    return { id };
 }
 
 auto to_vec4(const Eigen::Vector3f& v3, float w = 1.0f)
@@ -41,16 +45,36 @@ auto to_vec4(const Eigen::Vector3f& v3, float w = 1.0f)
 
 
 static bool insideTriangle(int x, int y, const Vector3f* _v)
-{   
+{
     // TODO : Implement this function to check if the point (x, y) is inside the triangle represented by _v[0], _v[1], _v[2]
+
+    auto ax = _v[0][0];
+    auto ay = _v[0][1];
+    auto az = _v[0][2];
+
+    auto bx = _v[1][0];
+    auto by = _v[1][1];
+    auto bz = _v[1][2];
+
+    auto cx = _v[2][0];
+    auto cy = _v[2][1];
+    auto cz = _v[2][2];
+
+    double total_area = signed_triangle_area(ax, ay, bx, by, cx, cy);
+
+    double wa = signed_triangle_area(x, y, bx, by, cx, cy) / total_area;
+    double wb = signed_triangle_area(x, y, cx, cy, ax, ay) / total_area;
+    double wc = signed_triangle_area(x, y, ax, ay, bx, by) / total_area;
+    if (wa < 0 || wb < 0 || wc < 0) return false; // negative barycentric coordinate => the pixel is outside the triangle
+    return true;
 }
 
 static std::tuple<float, float, float> computeBarycentric2D(float x, float y, const Vector3f* v)
 {
-    float c1 = (x*(v[1].y() - v[2].y()) + (v[2].x() - v[1].x())*y + v[1].x()*v[2].y() - v[2].x()*v[1].y()) / (v[0].x()*(v[1].y() - v[2].y()) + (v[2].x() - v[1].x())*v[0].y() + v[1].x()*v[2].y() - v[2].x()*v[1].y());
-    float c2 = (x*(v[2].y() - v[0].y()) + (v[0].x() - v[2].x())*y + v[2].x()*v[0].y() - v[0].x()*v[2].y()) / (v[1].x()*(v[2].y() - v[0].y()) + (v[0].x() - v[2].x())*v[1].y() + v[2].x()*v[0].y() - v[0].x()*v[2].y());
-    float c3 = (x*(v[0].y() - v[1].y()) + (v[1].x() - v[0].x())*y + v[0].x()*v[1].y() - v[1].x()*v[0].y()) / (v[2].x()*(v[0].y() - v[1].y()) + (v[1].x() - v[0].x())*v[2].y() + v[0].x()*v[1].y() - v[1].x()*v[0].y());
-    return {c1,c2,c3};
+    float c1 = (x * (v[1].y() - v[2].y()) + (v[2].x() - v[1].x()) * y + v[1].x() * v[2].y() - v[2].x() * v[1].y()) / (v[0].x() * (v[1].y() - v[2].y()) + (v[2].x() - v[1].x()) * v[0].y() + v[1].x() * v[2].y() - v[2].x() * v[1].y());
+    float c2 = (x * (v[2].y() - v[0].y()) + (v[0].x() - v[2].x()) * y + v[2].x() * v[0].y() - v[0].x() * v[2].y()) / (v[1].x() * (v[2].y() - v[0].y()) + (v[0].x() - v[2].x()) * v[1].y() + v[2].x() * v[0].y() - v[0].x() * v[2].y());
+    float c3 = (x * (v[0].y() - v[1].y()) + (v[1].x() - v[0].x()) * y + v[0].x() * v[1].y() - v[1].x() * v[0].y()) / (v[2].x() * (v[0].y() - v[1].y()) + (v[1].x() - v[0].x()) * v[2].y() + v[0].x() * v[1].y() - v[1].x() * v[0].y());
+    return { c1,c2,c3 };
 }
 
 void rst::rasterizer::draw(pos_buf_id pos_buffer, ind_buf_id ind_buffer, col_buf_id col_buffer, Primitive type)
@@ -76,10 +100,10 @@ void rst::rasterizer::draw(pos_buf_id pos_buffer, ind_buf_id ind_buffer, col_buf
             vec /= vec.w();
         }
         //Viewport transformation
-        for (auto & vert : v)
+        for (auto& vert : v)
         {
-            vert.x() = 0.5*width*(vert.x()+1.0);
-            vert.y() = 0.5*height*(vert.y()+1.0);
+            vert.x() = 0.5 * width * (vert.x() + 1.0);
+            vert.y() = 0.5 * height * (vert.y() + 1.0);
             vert.z() = vert.z() * f1 + f2;
         }
 
@@ -105,15 +129,67 @@ void rst::rasterizer::draw(pos_buf_id pos_buffer, ind_buf_id ind_buffer, col_buf
 //Screen space rasterization
 void rst::rasterizer::rasterize_triangle(const Triangle& t) {
     auto v = t.toVector4();
-    
+
+    auto ax = v[0][0];
+    auto ay = v[0][1];
+    auto az = v[0][2];
+
+    auto bx = v[1][0];
+    auto by = v[1][1];
+    auto bz = v[1][2];
+
+    auto cx = v[2][0];
+    auto cy = v[2][1];
+    auto cz = v[2][2];
+
+    // Bounding box in screen space, clamped to framebuffer.
+    // IMPORTANT: without clamping, x/y can go negative or exceed width/height,
+    // leading to out-of-bounds depth/frame buffer writes (crash / instant quit).
+    // int bbminx = static_cast<int>(std::floor(std::min({ax, bx, cx})));
+    // int bbmaxx = static_cast<int>(std::ceil (std::max({ax, bx, cx})));
+    // int bbminy = static_cast<int>(std::floor(std::min({ay, by, cy})));
+    // int bbmaxy = static_cast<int>(std::ceil (std::max({ay, by, cy})));
+    int bbminx = std::round(std::min(std::min(ax, bx), cx));
+    int bbmaxx = std::round(std::max(std::max(ax, bx), cx));
+    int bbminy = std::round(std::min(std::min(ay, by), cy));
+    int bbmaxy = std::round(std::max(std::max(ay, by), cy));
+
+    bbminx = std::max(0, bbminx);
+    bbmaxx = std::min(width - 1, bbmaxx);
+    bbminy = std::max(0, bbminy);
+    bbmaxy = std::min(height - 1, bbmaxy);
+
+    if (bbminx > bbmaxx || bbminy > bbmaxy)
+        return;
+
+    for (int x = bbminx; x <= bbmaxx; x++)
+    {
+        for (int y = bbminy; y <= bbmaxy; y++)
+        {
+            if (!insideTriangle(x, y, t.v)) continue;
+
+            auto [alpha, beta, gamma] = computeBarycentric2D(
+                static_cast<float>(x) + 0.5f,
+                static_cast<float>(y) + 0.5f,
+                t.v
+            );
+
+            float w_reciprocal = 1.0 / (alpha / v[0].w() + beta / v[1].w() + gamma / v[2].w());
+            float z_interpolated = alpha * v[0].z() / v[0].w() + beta * v[1].z() / v[1].w() + gamma * v[2].z() / v[2].w();
+            z_interpolated *= w_reciprocal;
+
+            const int idx = get_index(x, y);
+            if (-z_interpolated < depth_buf[idx])
+            {
+                depth_buf[idx] = -z_interpolated;
+                set_pixel(Eigen::Vector3f(static_cast<float>(x), static_cast<float>(y), z_interpolated), t.getColor());
+            }
+        }
+    }
     // TODO : Find out the bounding box of current triangle.
     // iterate through the pixel and find if the current pixel is inside the triangle
 
     // If so, use the following code to get the interpolated z value.
-    //auto[alpha, beta, gamma] = computeBarycentric2D(x, y, t.v);
-    //float w_reciprocal = 1.0/(alpha / v[0].w() + beta / v[1].w() + gamma / v[2].w());
-    //float z_interpolated = alpha * v[0].z() / v[0].w() + beta * v[1].z() / v[1].w() + gamma * v[2].z() / v[2].w();
-    //z_interpolated *= w_reciprocal;
 
     // TODO : set the current pixel (use the set_pixel function) to the color of the triangle (use getColor function) if it should be painted.
 }
@@ -137,7 +213,7 @@ void rst::rasterizer::clear(rst::Buffers buff)
 {
     if ((buff & rst::Buffers::Color) == rst::Buffers::Color)
     {
-        std::fill(frame_buf.begin(), frame_buf.end(), Eigen::Vector3f{0, 0, 0});
+        std::fill(frame_buf.begin(), frame_buf.end(), Eigen::Vector3f{ 0, 0, 0 });
     }
     if ((buff & rst::Buffers::Depth) == rst::Buffers::Depth)
     {
@@ -153,13 +229,13 @@ rst::rasterizer::rasterizer(int w, int h) : width(w), height(h)
 
 int rst::rasterizer::get_index(int x, int y)
 {
-    return (height-1-y)*width + x;
+    return (height - 1 - y) * width + x;
 }
 
 void rst::rasterizer::set_pixel(const Eigen::Vector3f& point, const Eigen::Vector3f& color)
 {
     //old index: auto ind = point.y() + point.x() * width;
-    auto ind = (height-1-point.y())*width + point.x();
+    auto ind = (height - 1 - point.y()) * width + point.x();
     frame_buf[ind] = color;
 
 }

@@ -26,6 +26,14 @@ Eigen::Matrix4f get_model_matrix(float rotation_angle)
     // TODO: Implement this function
     // Create the model matrix for rotating the triangle around the Z axis.
     // Then return it.
+    auto ratation_rad = rotation_angle * MY_PI / 180.0;
+
+    float cos_a = std::cos(ratation_rad);
+    float sin_a = std::sin(ratation_rad);
+    model <<    cos_a,  -sin_a, 0, 0, 
+                sin_a,  cos_a,  0, 0, 
+                0,      0,      1, 0,
+                0,      0,      0, 1;
 
     return model;
 }
@@ -33,15 +41,48 @@ Eigen::Matrix4f get_model_matrix(float rotation_angle)
 Eigen::Matrix4f get_projection_matrix(float eye_fov, float aspect_ratio,
                                       float zNear, float zFar)
 {
-    // Students will implement this function
-
-    Eigen::Matrix4f projection = Eigen::Matrix4f::Identity();
-
     // TODO: Implement this function
     // Create the projection matrix for the given parameters.
     // Then return it.
 
-    return projection;
+    Eigen::Matrix4f projection = Eigen::Matrix4f::Identity();
+
+    const auto eye_fov_rad = eye_fov * MY_PI / 180.0f;
+    const auto t =  zNear * std::tan(eye_fov_rad / 2.0f);
+    const auto b = -t;
+    const auto r = aspect_ratio * t; 
+    const auto l = -r;
+    const auto n = -zNear;
+    const auto f = -zFar;
+
+    // Frustum -> Cuboid
+    Eigen::Matrix4f persp_to_ortho;
+    persp_to_ortho << 
+        n,      0,      0,      0,
+        0,      n,      0,      0,
+        0,      0,      n+f,    -n*f,
+        0,      0,      1,      0;
+    
+    // Orthographics Projection
+    // Scale matrix
+    Eigen::Matrix4f ortho_proj_scale;
+    ortho_proj_scale <<
+        2.0f/(r-l), 0, 0, 0,
+        0, 2.0f/(t-b), 0, 0,
+        0, 0, 2.0f/(n-f), 0,
+        0, 0, 0, 1;
+
+    // Translate matrix
+    Eigen::Matrix4f ortho_proj_translate;
+    ortho_proj_translate <<
+        1, 0, 0, -(r+l)/2.0f,
+        0, 1, 0, -(t+b)/2.0f,
+        0, 0, 1, -(n+f)/2.0f,
+        0, 0, 0, 1;
+
+    Eigen::Matrix4f ortho_proj = ortho_proj_scale * ortho_proj_translate;
+
+    return ortho_proj * persp_to_ortho * projection;
 }
 
 int main(int argc, const char** argv)
