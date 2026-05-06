@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include "rasterizer.hpp"
+#include "Eigen/src/Core/Matrix.h"
 #include <opencv2/opencv.hpp>
 #include <math.h>
 
@@ -280,7 +281,70 @@ void rst::rasterizer::rasterize_triangle(const Triangle& t, const std::array<Eig
     // Use: Instead of passing the triangle's color directly to the frame buffer, pass the color to the shaders first to get the final color;
     // Use: auto pixel_color = fragment_shader(payload);
 
- 
+    // my implementation
+    auto v = t.toVector4();
+
+    auto ax = v[0][0];
+    auto ay = v[0][1];
+    auto az = v[0][2];
+
+    auto bx = v[1][0];
+    auto by = v[1][1];
+    auto bz = v[1][2];
+
+    auto cx = v[2][0];
+    auto cy = v[2][1];
+    auto cz = v[2][2];
+
+    int bbminx = std::round(std::min(std::min(ax, bx), cx));
+    int bbmaxx = std::round(std::max(std::max(ax, bx), cx));
+    int bbminy = std::round(std::min(std::min(ay, by), cy));
+    int bbmaxy = std::round(std::max(std::max(ay, by), cy));
+
+    bbminx = std::max(0, bbminx);
+    bbmaxx = std::min(width - 1, bbmaxx);
+    bbminy = std::max(0, bbminy);
+    bbmaxy = std::min(height - 1, bbmaxy);
+
+    if (bbminx > bbmaxx || bbminy > bbmaxy)
+        return;
+    
+    for (int x=bbminx; x<=bbmaxx; x++)
+    {
+        for (int y=bbminy; y<=bbmaxy; y++)
+        {
+            if(!insideTriangle(x, y, t.v)) continue;
+
+            auto[alpha, beta, gamma] = computeBarycentric2D(
+                static_cast<float>(x) + 0.5f, 
+                static_cast<float>(y) + 0.5f, 
+                t.v
+            );
+
+            float w_reciprocal = 1.0/(alpha / v[0].w() + beta / v[1].w() + gamma / v[2].w());
+            float z_interpolated = alpha * v[0].z() / v[0].w() + beta * v[1].z() / v[1].w() + gamma * v[2].z() / v[2].w();
+            z_interpolated *= w_reciprocal;
+
+            // TODO: Interpolate the attributes:
+            // auto interpolated_color
+            // auto interpolated_normal
+            // auto interpolated_texcoords
+            // auto interpolated_shadingcoords
+            
+            const int idx = get_index(x, y);
+            if(-z_interpolated < depth_buf[idx])
+            {
+                depth_buf[idx] = -z_interpolated;
+                // set_pixel(Eigen::Vector2i(x, y), t.getColor());
+                set_pixel(Eigen::Vector2i(x, y), Eigen::Vector3f(255.f, 255.f, 255.f));
+            }
+
+            // Use: fragment_shader_payload payload( interpolated_color, interpolated_normal.normalized(), interpolated_texcoords, texture ? &*texture : nullptr);
+            // Use: payload.view_pos = interpolated_shadingcoords;
+            // Use: Instead of passing the triangle's color directly to the frame buffer, pass the color to the shaders first to get the final color;
+            // Use: auto pixel_color = fragment_shader(payload);
+        }
+    }
 }
 
 void rst::rasterizer::set_model(const Eigen::Matrix4f& m)
